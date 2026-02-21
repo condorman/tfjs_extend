@@ -1,0 +1,15 @@
+{
+  "name": "tfjs_extend",
+  "version": "1.0.0",
+  "description": "- Extended metrics (AUC, F1)",
+  "main": "golden.test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "vitest": "^4.0.18"
+  }
+}
