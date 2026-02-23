@@ -1,74 +1,121 @@
 import * as tf from '@tensorflow/tfjs';
 
-const EPSILON = 1e-7;
-const F1_THRESHOLD = 0.5;
-const AUC_NUM_THRESHOLDS = 200;
-const HALF = 0.5;
-const AUC_FALLBACK = 0.5;
-
-const AUC_THRESHOLDS = new Float32Array(AUC_NUM_THRESHOLDS);
-AUC_THRESHOLDS[0] = -EPSILON;
-for (let i = 1; i < AUC_NUM_THRESHOLDS - 1; i += 1) {
-  AUC_THRESHOLDS[i] = i / (AUC_NUM_THRESHOLDS - 1);
-}
-AUC_THRESHOLDS[AUC_NUM_THRESHOLDS - 1] = 1 + EPSILON;
-
-let cachedAucThresholdTensor = null;
-let cachedAucThresholdBackend = null;
-
-function getAucThresholdTensor() {
-  const backend = tf.getBackend();
-
-  if (cachedAucThresholdTensor && cachedAucThresholdBackend !== backend) {
-    cachedAucThresholdTensor.dispose();
-    cachedAucThresholdTensor = null;
-  }
-
-  if (!cachedAucThresholdTensor) {
-    cachedAucThresholdTensor = tf.keep(tf.tensor1d(AUC_THRESHOLDS).expandDims(1));
-    cachedAucThresholdBackend = backend;
-  }
-
-  return cachedAucThresholdTensor;
-}
-
 /**
  * AUC as pure function for TensorFlow.js metrics
  * Matches Keras AUC by computing ROC using fixed thresholds.
  * Keras reference: https://github.com/keras-team/keras/blob/v3.13.2/keras/src/metrics/confusion_metrics.py#L1068
  * Uses trapezoidal rule for numerical integration of ROC curve
  */
+const numThresholds = 200;
+const threshold = 0.5;
+const epsilon = 1e-7; // Matches Keras backend.epsilon()
+
+let cachedBackend = null;
+let cachedThresholds = null;
+let cachedZero = null;
+let cachedHalf = null;
+let cachedOne = null;
+let cachedTwo = null;
+let cachedThreshold = null;
+let cachedEpsilon = null;
+
+function isDisposed(tensor) {
+  return !tensor || tensor.isDisposedInternal === true;
+}
+
+function disposeCachedTensors() {
+  [cachedThresholds, cachedZero, cachedHalf, cachedOne, cachedTwo, cachedThreshold, cachedEpsilon].forEach((tensor) => {
+    if (!isDisposed(tensor)) {
+      tensor.dispose();
+    }
+  });
+
+  cachedThresholds = null;
+  cachedZero = null;
+  cachedHalf = null;
+  cachedOne = null;
+  cachedTwo = null;
+  cachedThreshold = null;
+  cachedEpsilon = null;
+}
+
+export function clearMetricsTensorCache() {
+  disposeCachedTensors();
+  cachedBackend = null;
+}
+
+function getCachedTensors() {
+  const backend = tf.getBackend();
+  const cacheInvalid =
+    backend !== cachedBackend ||
+    isDisposed(cachedThresholds) ||
+    isDisposed(cachedZero) ||
+    isDisposed(cachedHalf) ||
+    isDisposed(cachedOne) ||
+    isDisposed(cachedTwo) ||
+    isDisposed(cachedThreshold) ||
+    isDisposed(cachedEpsilon);
+
+  if (cacheInvalid) {
+    disposeCachedTensors();
+
+    cachedThresholds = tf.linspace(1, 0, numThresholds);
+    cachedZero = tf.scalar(0);
+    cachedHalf = tf.scalar(0.5);
+    cachedOne = tf.scalar(1);
+    cachedTwo = tf.scalar(2);
+    cachedThreshold = tf.scalar(threshold);
+    cachedEpsilon = tf.scalar(epsilon);
+    cachedBackend = backend;
+  }
+
+  return {
+    thresholds: cachedThresholds,
+    zero: cachedZero,
+    half: cachedHalf,
+    one: cachedOne,
+    two: cachedTwo,
+    threshold: cachedThreshold,
+    epsilon: cachedEpsilon,
+  };
+}
+
 export function auc(yTrue, yPred) {
+  const c = getCachedTensors();
+
   return tf.tidy(() => {
-    const yTrueFlat = yTrue.reshape([-1]);
-    const yPredFlat = yPred.reshape([-1]);
-    const thresholdTensor = getAucThresholdTensor();
 
-    const labels = yTrueFlat.expandDims(0);
-    const predictions = yPredFlat.expandDims(0);
+    const yTrueFlat = tf.reshape(yTrue, [-1]);
+    const yPredFlat = tf.reshape(yPred, [-1]);
 
-    const totalPos = labels.sum();
-    const totalNeg = tf.sub(yTrueFlat.size, totalPos);
-    const hasPos = totalPos.greater(0);
-    const hasNeg = totalNeg.greater(0);
+    const totalPos = tf.sum(yTrueFlat);
+    const totalNeg = tf.sub(tf.scalar(yTrueFlat.size), totalPos);
 
-    const predPos = predictions.greater(thresholdTensor).cast('float32');
-    const tp = predPos.mul(labels).sum(1);
-    const fp = predPos.sum(1).sub(tp);
+    const hasPos = tf.greater(totalPos, c.zero);
+    const hasNeg = tf.greater(totalNeg, c.zero);
+
+    const yPredExpanded = tf.expandDims(yPredFlat, 1);
+    const yTrueExpanded = tf.expandDims(yTrueFlat, 1);
+
+    const predPos = tf.greaterEqual(yPredExpanded, c.thresholds);
+    const tp = tf.sum(tf.mul(predPos, yTrueExpanded), 0);
+    const fp = tf.sum(tf.mul(predPos, tf.sub(c.one, yTrueExpanded)), 0);
 
     const tpr = tf.divNoNan(tp, totalPos);
     const fpr = tf.divNoNan(fp, totalNeg);
 
-    const fprSliced = fpr.slice([1], [AUC_NUM_THRESHOLDS - 1]);
-    const fprPrev = fpr.slice([0], [AUC_NUM_THRESHOLDS - 1]);
-    const tprSliced = tpr.slice([1], [AUC_NUM_THRESHOLDS - 1]);
-    const tprPrev = tpr.slice([0], [AUC_NUM_THRESHOLDS - 1]);
+    // Calculate AUC using trapezoidal rule: sum of (dx * (y1 + y2) / 2)
+    const fprSliced = fpr.slice([1], [numThresholds - 1]);
+    const fprPrev = fpr.slice([0], [numThresholds - 1]);
+    const tprSliced = tpr.slice([1], [numThresholds - 1]);
+    const tprPrev = tpr.slice([0], [numThresholds - 1]);
 
-    const fprDiff = fprPrev.sub(fprSliced);
-    const tprSum = tprSliced.add(tprPrev);
-    const aucTensor = fprDiff.mul(tprSum).mul(HALF).sum();
+    const fprDiff = tf.sub(fprSliced, fprPrev);
+    const tprSum = tf.add(tprSliced, tprPrev);
+    const aucTensor = tf.sum(tf.mul(fprDiff, tf.mul(c.half, tprSum)));
 
-    return tf.where(hasPos.logicalAnd(hasNeg), aucTensor, AUC_FALLBACK);
+    const safeAuc = tf.where(tf.logicalAnd(hasPos, hasNeg), aucTensor, c.half);
+    return tf.clipByValue(safeAuc, 0, 1);
   });
 }
 
@@ -78,18 +125,31 @@ export function auc(yTrue, yPred) {
  * Keras reference: https://github.com/keras-team/keras/blob/v3.13.2/keras/src/metrics/f_score_metrics.py#L250
  */
 export function f1(yTrue, yPred) {
+  const c = getCachedTensors();
+
   return tf.tidy(() => {
-    const yTrueFlat = yTrue.reshape([-1]);
-    const yPredFlat = yPred.reshape([-1]);
 
-    const yPredThresholded = yPredFlat.greater(F1_THRESHOLD).cast('float32');
+    const yTrueFlat = tf.reshape(yTrue, [-1]);
+    const yPredFlat = tf.reshape(yPred, [-1]);
 
-    const tp = yPredThresholded.mul(yTrueFlat).sum();
-    const predictedPos = yPredThresholded.sum();
-    const possiblePos = yTrueFlat.sum();
+    // Apply threshold to predictions
+    const yPredThresholded = tf.greaterEqual(yPredFlat, c.threshold);
 
-    const precision = tp.div(predictedPos.add(EPSILON));
-    const recall = tp.div(possiblePos.add(EPSILON));
-    return precision.mul(recall).mul(2).div(precision.add(recall).add(EPSILON));
+    // Calculate True Positives, False Positives, False Negatives
+    const tp = tf.sum(tf.mul(yTrueFlat, yPredThresholded));
+    const fp = tf.sum(tf.mul(tf.sub(c.one, yTrueFlat), yPredThresholded));
+    const fn = tf.sum(tf.mul(yTrueFlat, tf.sub(c.one, yPredThresholded)));
+
+    // Calculate precision and recall with epsilon (Keras approach)
+    const precision = tf.div(tp, tf.add(tf.add(tp, fp), c.epsilon));
+    const recall = tf.div(tp, tf.add(tf.add(tp, fn), c.epsilon));
+
+    // Calculate F1 score: 2 * (precision * recall) / (precision + recall + epsilon)
+    const mulValue = tf.mul(precision, recall);
+    const addValue = tf.add(precision, recall);
+    return tf.div(
+      tf.mul(c.two, mulValue),
+      tf.add(addValue, c.epsilon)
+    );
   });
 }
