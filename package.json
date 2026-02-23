@@ -1,7 +1,7 @@
 {
   "name": "tfjs_extend",
   "version": "1.0.0",
-  "description": "TensorFlow.js extensions for metrics and optimizers",
+  "description": "TensorFlow.js extensions for metrics, optimizers and layers",
   "type": "module",
   "main": "./index.js",
   "types": "./index.d.ts",
@@ -22,6 +22,11 @@
       "types": "./src/optimizer.d.ts",
       "import": "./src/optimizer.js",
       "default": "./src/optimizer.js"
+    },
+    "./layers": {
+      "types": "./src/layers.d.ts",
+      "import": "./src/layers.js",
+      "default": "./src/layers.js"
     }
   },
   "files": [

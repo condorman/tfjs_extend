@@ -370,9 +370,257 @@ ADAMW_CASES = [
     },
 ]
 
+MHA_REFERENCE = (
+    "https://github.com/keras-team/keras/blob/v3.13.2/keras/src/layers/attention/"
+    "multi_head_attention.py#L19"
+)
+
+MHA_DEFAULTS = {
+    "num_heads": None,
+    "key_dim": None,
+    "value_dim": None,
+    "dropout": 0.0,
+    "use_bias": True,
+    "output_shape": None,
+    "attention_axes": None,
+    "flash_attention": None,
+    "kernel_initializer": "glorot_uniform",
+    "bias_initializer": "zeros",
+    "kernel_regularizer": None,
+    "bias_regularizer": None,
+    "activity_regularizer": None,
+    "kernel_constraint": None,
+    "bias_constraint": None,
+    "seed": None,
+}
+
+MHA_PARAMETERS = [
+    {"name": "num_heads", "default": MHA_DEFAULTS["num_heads"]},
+    {"name": "key_dim", "default": MHA_DEFAULTS["key_dim"]},
+    {"name": "value_dim", "default": MHA_DEFAULTS["value_dim"]},
+    {"name": "dropout", "default": MHA_DEFAULTS["dropout"]},
+    {"name": "use_bias", "default": MHA_DEFAULTS["use_bias"]},
+    {"name": "output_shape", "default": MHA_DEFAULTS["output_shape"]},
+    {"name": "attention_axes", "default": MHA_DEFAULTS["attention_axes"]},
+    {"name": "flash_attention", "default": MHA_DEFAULTS["flash_attention"]},
+    {"name": "kernel_initializer", "default": MHA_DEFAULTS["kernel_initializer"]},
+    {"name": "bias_initializer", "default": MHA_DEFAULTS["bias_initializer"]},
+    {"name": "kernel_regularizer", "default": MHA_DEFAULTS["kernel_regularizer"]},
+    {"name": "bias_regularizer", "default": MHA_DEFAULTS["bias_regularizer"]},
+    {"name": "activity_regularizer", "default": MHA_DEFAULTS["activity_regularizer"]},
+    {"name": "kernel_constraint", "default": MHA_DEFAULTS["kernel_constraint"]},
+    {"name": "bias_constraint", "default": MHA_DEFAULTS["bias_constraint"]},
+    {"name": "seed", "default": MHA_DEFAULTS["seed"]},
+]
+
+MHA_CASES = [
+    {
+        "id": "mha_self_default",
+        "description": "Self-attention with Keras defaults.",
+        "query_shape": (2, 5, 8),
+        "value_shape": (2, 5, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["num_heads", "key_dim"],
+    },
+    {
+        "id": "mha_cross_without_explicit_key",
+        "description": "Cross-attention shape with implicit key=value.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 6, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": [],
+    },
+    {
+        "id": "mha_cross_with_explicit_key",
+        "description": "Cross-attention with explicit key tensor.",
+        "query_shape": (2, 3, 8),
+        "value_shape": (2, 5, 8),
+        "key_shape": (2, 5, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": [],
+    },
+    {
+        "id": "mha_value_dim",
+        "description": "Custom value_dim different from key_dim.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 3, "value_dim": 5},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["value_dim"],
+    },
+    {
+        "id": "mha_use_bias_false",
+        "description": "Bias disabled on all projections.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "use_bias": False},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["use_bias"],
+    },
+    {
+        "id": "mha_output_shape_int",
+        "description": "Output projection with integer output_shape.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "output_shape": 6},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["output_shape"],
+    },
+    {
+        "id": "mha_output_shape_tuple",
+        "description": "Output projection with tuple output_shape.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "output_shape": (4, 2)},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["output_shape"],
+    },
+    {
+        "id": "mha_attention_axes_rank4",
+        "description": "Rank-4 inputs with positive attention_axes.",
+        "query_shape": (2, 3, 4, 8),
+        "value_shape": (2, 3, 2, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "attention_axes": (2,)},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["attention_axes"],
+    },
+    {
+        "id": "mha_attention_axes_rank5",
+        "description": "Rank-5 inputs with 2D attention.",
+        "query_shape": (2, 2, 3, 4, 8),
+        "value_shape": (2, 2, 3, 2, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "attention_axes": (2, 3)},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["attention_axes"],
+    },
+    {
+        "id": "mha_attention_mask_2d",
+        "description": "2D attention mask broadcasting.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": "2d",
+        "covers": [],
+    },
+    {
+        "id": "mha_attention_mask_3d",
+        "description": "3D attention mask broadcasting.",
+        "query_shape": (2, 3, 8),
+        "value_shape": (2, 5, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": "3d",
+        "covers": [],
+    },
+    {
+        "id": "mha_attention_mask_4d",
+        "description": "4D attention mask with explicit head dim.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {},
+        "attention_mask_kind": "4d",
+        "covers": [],
+    },
+    {
+        "id": "mha_use_causal_mask",
+        "description": "Causal masking path.",
+        "query_shape": (2, 5, 8),
+        "value_shape": (2, 5, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {"use_causal_mask": True},
+        "attention_mask_kind": None,
+        "covers": [],
+    },
+    {
+        "id": "mha_return_attention_scores",
+        "description": "Return attention scores alongside output.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4},
+        "kwargs": {"return_attention_scores": True},
+        "attention_mask_kind": None,
+        "covers": [],
+    },
+    {
+        "id": "mha_dropout_inference",
+        "description": "Dropout configured but deterministic inference mode.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "dropout": 0.25, "seed": 17},
+        "kwargs": {"training": False},
+        "attention_mask_kind": None,
+        "covers": ["dropout", "seed"],
+    },
+    {
+        "id": "mha_advanced_config",
+        "description": "Initializer/regularizer/constraint configuration coverage.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {
+            "num_heads": 2,
+            "key_dim": 4,
+            "kernel_initializer": "he_uniform",
+            "bias_initializer": "ones",
+            "kernel_regularizer": "l2",
+            "bias_regularizer": "l1",
+            "activity_regularizer": "l2",
+            "kernel_constraint": "max_norm",
+            "bias_constraint": "non_neg",
+        },
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": [
+            "kernel_initializer",
+            "bias_initializer",
+            "kernel_regularizer",
+            "bias_regularizer",
+            "activity_regularizer",
+            "kernel_constraint",
+            "bias_constraint",
+        ],
+    },
+    {
+        "id": "mha_flash_attention_false",
+        "description": "Explicit flash_attention=False compatibility.",
+        "query_shape": (2, 4, 8),
+        "value_shape": (2, 4, 8),
+        "config": {"num_heads": 2, "key_dim": 4, "flash_attention": False},
+        "kwargs": {},
+        "attention_mask_kind": None,
+        "covers": ["flash_attention"],
+    },
+    {
+        "id": "mha_combined_cross_scores_mask",
+        "description": "Combined cross-attention, scores and 3D mask.",
+        "query_shape": (2, 3, 8),
+        "value_shape": (2, 5, 8),
+        "key_shape": (2, 5, 8),
+        "config": {"num_heads": 2, "key_dim": 3, "value_dim": 5, "output_shape": 7},
+        "kwargs": {"return_attention_scores": True},
+        "attention_mask_kind": "3d",
+        "covers": ["value_dim", "output_shape"],
+    },
+]
+
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate golden fixture from Keras metrics and AdamW.")
+    parser = argparse.ArgumentParser(
+        description="Generate golden fixture from Keras metrics, AdamW and MultiHeadAttention."
+    )
     parser.add_argument(
         "-o",
         "--output",
@@ -582,6 +830,146 @@ def build_adamw_fixture() -> dict[str, object]:
     }
 
 
+def _random_f32(rng: np.random.Generator, shape: tuple[int, ...], scale: float = 0.5) -> np.ndarray:
+    return rng.normal(loc=0.0, scale=scale, size=shape).astype(np.float32)
+
+
+def _ensure_mask_rows(mask: np.ndarray) -> np.ndarray:
+    flat = mask.reshape((-1, mask.shape[-1]))
+    for row in flat:
+        if not np.any(row):
+            row[0] = True
+    return flat.reshape(mask.shape)
+
+
+def _make_attention_mask(
+    rng: np.random.Generator,
+    kind: str | None,
+    query_shape: tuple[int, ...],
+    value_shape: tuple[int, ...],
+    num_heads: int,
+) -> np.ndarray | None:
+    if kind is None:
+        return None
+
+    q_length = int(query_shape[1])
+    v_length = int(value_shape[1])
+
+    if kind == "2d":
+        shape = (q_length, v_length)
+    elif kind == "3d":
+        shape = (int(query_shape[0]), q_length, v_length)
+    elif kind == "4d":
+        shape = (int(query_shape[0]), num_heads, q_length, v_length)
+    else:
+        raise ValueError(f"Unsupported attention mask kind: {kind}")
+
+    mask = rng.uniform(size=shape) > 0.25
+    return _ensure_mask_rows(mask)
+
+
+def _serialize_optional_array(value: np.ndarray | None) -> list | None:
+    if value is None:
+        return None
+    return value.tolist()
+
+
+def build_mha_fixture() -> dict[str, object]:
+    fixture_cases = []
+    covered_parameters = set()
+
+    for case_index, case in enumerate(MHA_CASES):
+        keras.backend.clear_session()
+
+        covered_parameters.update(case["covers"])
+        rng = np.random.default_rng(202600 + case_index)
+
+        query_shape = tuple(case["query_shape"])
+        value_shape = tuple(case["value_shape"])
+        key_shape = tuple(case["key_shape"]) if case.get("key_shape") is not None else None
+
+        config = {**MHA_DEFAULTS, **case["config"]}
+        kwargs = {"training": False, **case.get("kwargs", {})}
+        call_kwargs = dict(kwargs)
+
+        query = _random_f32(rng, query_shape)
+        value = _random_f32(rng, value_shape)
+        key = _random_f32(rng, key_shape) if key_shape is not None else None
+
+        layer = keras.layers.MultiHeadAttention(**case["config"])
+        if key is None:
+            _ = layer(query=query, value=value, training=False)
+        else:
+            _ = layer(query=query, value=value, key=key, training=False)
+
+        generated_weights = []
+        for weight in layer.get_weights():
+            generated_weights.append(_random_f32(rng, weight.shape, scale=0.35))
+        layer.set_weights(generated_weights)
+
+        attention_mask = _make_attention_mask(
+            rng,
+            case.get("attention_mask_kind"),
+            query_shape,
+            key_shape if key_shape is not None else value_shape,
+            num_heads=int(config["num_heads"]),
+        )
+
+        if attention_mask is not None:
+            call_kwargs["attention_mask"] = attention_mask
+
+        if key is None:
+            output = layer(query=query, value=value, **call_kwargs)
+        else:
+            output = layer(query=query, value=value, key=key, **call_kwargs)
+
+        return_scores = bool(kwargs.get("return_attention_scores", False))
+        if return_scores:
+            output_tensor, score_tensor = output
+            expected_output = np.asarray(output_tensor, dtype=np.float32)
+            expected_scores = np.asarray(score_tensor, dtype=np.float32)
+        else:
+            expected_output = np.asarray(output, dtype=np.float32)
+            expected_scores = None
+
+        fixture_cases.append(
+            {
+                "id": case["id"],
+                "description": case["description"],
+                "query": query.astype(np.float32).tolist(),
+                "value": value.astype(np.float32).tolist(),
+                "key": _serialize_optional_array(key.astype(np.float32) if key is not None else None),
+                "attentionMask": _serialize_optional_array(attention_mask),
+                "config": config,
+                "kwargs": kwargs,
+                "weights": [weight.astype(np.float32).tolist() for weight in generated_weights],
+                "expected": {
+                    "output": expected_output.tolist(),
+                    "attentionScores": (
+                        expected_scores.tolist()
+                        if expected_scores is not None
+                        else None
+                    ),
+                },
+            }
+        )
+
+    return {
+        "meta": {
+            "reference": MHA_REFERENCE,
+            "runtime_keras_version": keras.__version__,
+            "defaults": MHA_DEFAULTS,
+            "parameters": MHA_PARAMETERS,
+            "covered_parameters": sorted(covered_parameters),
+            "notes": [
+                "Golden values generated with local Keras runtime (Python 3.9).",
+                "Semantic implementation target remains Keras v3.13.2 source reference.",
+            ],
+        },
+        "cases": fixture_cases,
+    }
+
+
 def build_fixture() -> dict:
     fixture = {
         "meta": {
@@ -596,6 +984,7 @@ def build_fixture() -> dict:
         },
         "cases": [],
         "optimizerAdamW": build_adamw_fixture(),
+        "layerMultiHeadAttention": build_mha_fixture(),
     }
 
     for case in CASES:
