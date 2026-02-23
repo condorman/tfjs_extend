@@ -2,7 +2,7 @@
   "name": "tfjs_extend",
   "version": "1.0.0",
   "description": "- Extended metrics (AUC, F1)",
-  "main": "golden.test.js",
+  "main": "metric.golden.test.js",
   "scripts": {
     "test": "vitest run",
     "golden:generate": "python3 generate_golden.py"
