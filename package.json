@@ -1,8 +1,29 @@
 {
   "name": "tfjs_extend",
   "version": "1.0.0",
-  "description": "- Extended metrics (AUC, F1)",
-  "main": "metric.golden.test.js",
+  "description": "TensorFlow.js extensions for metrics and optimizers",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "browser": "./index.js",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./metrics": {
+      "import": "./src/metrics.js",
+      "default": "./src/metrics.js"
+    },
+    "./optimizer": {
+      "import": "./src/optimizer.js",
+      "default": "./src/optimizer.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "src"
+  ],
   "scripts": {
     "test": "vitest run",
     "golden:generate": "python3 generate_golden.py"

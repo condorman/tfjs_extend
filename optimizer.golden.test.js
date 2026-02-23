@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as tf from '@tensorflow/tfjs'
-import { AdamWOptimizer } from './src/optimizer.js'
+import { AdamW } from './src/optimizer.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -44,17 +44,17 @@ describe('adamw fixture schema', () => {
 describe('adamw parity with generated golden', () => {
   for (const testCase of optimizerFixture.cases) {
     it(`matches expected for ${testCase.id}`, () => {
-      const config = AdamWOptimizer.normalizeConfig(testCase.config)
+      const config = AdamW.normalizeConfig(testCase.config)
       let variable = tf.tensor1d(testCase.initialVariable, 'float32')
-      let state = AdamWOptimizer.createState(variable, config)
+      let state = AdamW.createState(variable, config)
 
       for (const gradientValues of testCase.gradients) {
         const gradient = tf.tensor1d(gradientValues, 'float32')
-        const next = AdamWOptimizer.step(variable, gradient, state, config)
+        const next = AdamW.step(variable, gradient, state, config)
 
         gradient.dispose()
         variable.dispose()
-        AdamWOptimizer.disposeState(state)
+        AdamW.disposeState(state)
 
         variable = next.variable
         state = next.state
@@ -63,7 +63,7 @@ describe('adamw parity with generated golden', () => {
       expectTensorCloseTo(variable, testCase.expected.finalVariable)
       expect(state.iterations).toBe(testCase.expected.finalInternalIterations)
 
-      const optimizerIterations = AdamWOptimizer.getOptimizerIterations(state.iterations, config)
+      const optimizerIterations = AdamW.getOptimizerIterations(state.iterations, config)
       expect(optimizerIterations).toBe(testCase.expected.finalOptimizerIterations)
 
       expectTensorCloseTo(state.momentum, testCase.expected.momentum)
@@ -91,7 +91,7 @@ describe('adamw parity with generated golden', () => {
       }
 
       variable.dispose()
-      AdamWOptimizer.disposeState(state)
+      AdamW.disposeState(state)
     })
   }
 })

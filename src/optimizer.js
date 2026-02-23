@@ -9,7 +9,7 @@ import {
   tensorShapeEquals,
 } from './_utils.js';
 
-export class AdamWOptimizer extends tf.Optimizer {
+export class AdamW extends tf.Optimizer {
   static DEFAULTS = Object.freeze({
     learning_rate: 0.001,
     weight_decay: 0.004,
@@ -207,7 +207,7 @@ export class AdamWOptimizer extends tf.Optimizer {
 
   static _resolveState(state, variableTensor, config) {
     if (!state) {
-      throw new Error('State is required. Use `AdamWOptimizer.createState(variable, config)` for the first step.');
+      throw new Error('State is required. Use `AdamW.createState(variable, config)` for the first step.');
     }
 
     const iterations = Number.isInteger(state.iterations) && state.iterations >= 0
