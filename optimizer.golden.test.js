@@ -3,13 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as tf from '@tensorflow/tfjs'
-import {
-  adamWStep,
-  createAdamWState,
-  disposeAdamWState,
-  getAdamWOptimizerIterations,
-  normalizeAdamWConfig,
-} from './src/optimizer.js'
+import { AdamWOptimizer } from './src/optimizer.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -50,17 +44,17 @@ describe('adamw fixture schema', () => {
 describe('adamw parity with generated golden', () => {
   for (const testCase of optimizerFixture.cases) {
     it(`matches expected for ${testCase.id}`, () => {
-      const config = normalizeAdamWConfig(testCase.config)
+      const config = AdamWOptimizer.normalizeConfig(testCase.config)
       let variable = tf.tensor1d(testCase.initialVariable, 'float32')
-      let state = createAdamWState(variable, config)
+      let state = AdamWOptimizer.createState(variable, config)
 
       for (const gradientValues of testCase.gradients) {
         const gradient = tf.tensor1d(gradientValues, 'float32')
-        const next = adamWStep(variable, gradient, state, config)
+        const next = AdamWOptimizer.step(variable, gradient, state, config)
 
         gradient.dispose()
         variable.dispose()
-        disposeAdamWState(state)
+        AdamWOptimizer.disposeState(state)
 
         variable = next.variable
         state = next.state
@@ -69,7 +63,7 @@ describe('adamw parity with generated golden', () => {
       expectTensorCloseTo(variable, testCase.expected.finalVariable)
       expect(state.iterations).toBe(testCase.expected.finalInternalIterations)
 
-      const optimizerIterations = getAdamWOptimizerIterations(state.iterations, config)
+      const optimizerIterations = AdamWOptimizer.getOptimizerIterations(state.iterations, config)
       expect(optimizerIterations).toBe(testCase.expected.finalOptimizerIterations)
 
       expectTensorCloseTo(state.momentum, testCase.expected.momentum)
@@ -97,7 +91,7 @@ describe('adamw parity with generated golden', () => {
       }
 
       variable.dispose()
-      disposeAdamWState(state)
+      AdamWOptimizer.disposeState(state)
     })
   }
 })

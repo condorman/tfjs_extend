@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import * as tf from '@tensorflow/tfjs'
-import { ADAMW_DEFAULTS, AdamW, AdamWOptimizer } from './src/optimizer.js'
+import { AdamWOptimizer } from './src/optimizer.js'
 
-describe('AdamW factory for model.compile', () => {
+describe('AdamW optimizer for model.compile', () => {
   it('returns a tf.Optimizer instance with python defaults', () => {
-    const optimizer = AdamW()
+    const optimizer = new AdamWOptimizer()
 
     expect(optimizer instanceof tf.Optimizer).toBe(true)
     expect(optimizer instanceof AdamWOptimizer).toBe(true)
 
     const config = optimizer.getConfig()
-    expect(config.learning_rate).toBe(ADAMW_DEFAULTS.learning_rate)
-    expect(config.weight_decay).toBe(ADAMW_DEFAULTS.weight_decay)
-    expect(config.beta_1).toBe(ADAMW_DEFAULTS.beta_1)
-    expect(config.beta_2).toBe(ADAMW_DEFAULTS.beta_2)
-    expect(config.epsilon).toBe(ADAMW_DEFAULTS.epsilon)
+    expect(config.learning_rate).toBe(AdamWOptimizer.DEFAULTS.learning_rate)
+    expect(config.weight_decay).toBe(AdamWOptimizer.DEFAULTS.weight_decay)
+    expect(config.beta_1).toBe(AdamWOptimizer.DEFAULTS.beta_1)
+    expect(config.beta_2).toBe(AdamWOptimizer.DEFAULTS.beta_2)
+    expect(config.epsilon).toBe(AdamWOptimizer.DEFAULTS.epsilon)
 
     optimizer.dispose()
   })
@@ -23,7 +23,7 @@ describe('AdamW factory for model.compile', () => {
     const model = tf.sequential()
     model.add(tf.layers.dense({ units: 1, inputShape: [1] }))
 
-    const optimizer = AdamW({
+    const optimizer = new AdamWOptimizer({
       learning_rate: 0.01,
       weight_decay: 0.02,
       beta_1: 0.8,
