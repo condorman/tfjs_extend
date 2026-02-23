@@ -4,23 +4,28 @@
   "description": "TensorFlow.js extensions for metrics and optimizers",
   "type": "module",
   "main": "./index.js",
+  "types": "./index.d.ts",
   "module": "./index.js",
   "browser": "./index.js",
   "exports": {
     ".": {
+      "types": "./index.d.ts",
       "import": "./index.js",
       "default": "./index.js"
     },
     "./metrics": {
+      "types": "./src/metrics.d.ts",
       "import": "./src/metrics.js",
       "default": "./src/metrics.js"
     },
     "./optimizer": {
+      "types": "./src/optimizer.d.ts",
       "import": "./src/optimizer.js",
       "default": "./src/optimizer.js"
     }
   },
   "files": [
+    "index.d.ts",
     "index.js",
     "src"
   ],
