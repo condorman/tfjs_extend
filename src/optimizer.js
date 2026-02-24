@@ -257,25 +257,25 @@ export class AdamW extends tf.Optimizer {
   }
 
   static _clipByNorm(values, clipnorm) {
-    const clipNorm = tf.scalar(clipnorm, 'float32');
     const l2sum = tf.sum(tf.square(values));
     const pred = tf.greater(l2sum, 0);
     const l2sumSafe = tf.where(pred, l2sum, tf.onesLike(l2sum));
     const l2norm = tf.where(pred, tf.sqrt(l2sumSafe), l2sum);
-    const numerator = tf.mul(values, clipNorm);
-    const denominator = tf.maximum(l2norm, clipNorm);
-    return tf.div(numerator, denominator);
+    const scale = tf.div(clipnorm, tf.maximum(l2norm, clipnorm));
+    return tf.mul(values, scale);
+  }
+
+  static _globalNormScaleFromNorm(useNorm, clipnorm) {
+    const scaleForFinite = tf.mul(
+      clipnorm,
+      tf.minimum(tf.div(1, useNorm), 1 / clipnorm)
+    );
+    return tf.add(scaleForFinite, tf.sub(useNorm, useNorm));
   }
 
   static _clipByGlobalNorm(values, clipnorm) {
-    const clipNorm = tf.scalar(clipnorm, 'float32');
-    const one = tf.scalar(1, 'float32');
     const useNorm = tf.sqrt(tf.sum(tf.square(values)));
-    const scaleForFinite = tf.mul(
-      clipNorm,
-      tf.minimum(tf.div(one, useNorm), tf.div(one, clipNorm))
-    );
-    const scale = tf.add(scaleForFinite, tf.sub(useNorm, useNorm));
+    const scale = this._globalNormScaleFromNorm(useNorm, clipnorm);
     return tf.mul(values, scale);
   }
 
@@ -303,14 +303,9 @@ export class AdamW extends tf.Optimizer {
 
     if (config.global_clipnorm != null && config.global_clipnorm > 0) {
       const squaredNorms = gradients.map((gradient) => tf.sum(tf.square(gradient)));
-      const useNorm = tf.sqrt(tf.sum(tf.stack(squaredNorms)));
-      const clipNorm = tf.scalar(config.global_clipnorm, 'float32');
-      const one = tf.scalar(1, 'float32');
-      const scaleForFinite = tf.mul(
-        clipNorm,
-        tf.minimum(tf.div(one, useNorm), tf.div(one, clipNorm))
-      );
-      const scale = tf.add(scaleForFinite, tf.sub(useNorm, useNorm));
+      const squaredNormSum = squaredNorms.length === 1 ? squaredNorms[0] : tf.addN(squaredNorms);
+      const useNorm = tf.sqrt(squaredNormSum);
+      const scale = this._globalNormScaleFromNorm(useNorm, config.global_clipnorm);
       return gradients.map((gradient) => tf.mul(gradient, scale));
     }
 
@@ -469,11 +464,47 @@ export class AdamW extends tf.Optimizer {
   constructor(options = {}) {
     super();
     this.config = this.constructor.normalizeConfig(options);
+    this._useEma = this.config.use_ema;
+    this._emaMomentum = this.config.ema_momentum;
+    this._emaOverwriteFrequency = this.config.ema_overwrite_frequency;
+    this._learningRate = this.config.learning_rate;
+    this._beta1 = this.config.beta_1;
+    this._beta2 = this.config.beta_2;
+    this._epsilon = this.config.epsilon;
+    this._amsgrad = this.config.amsgrad;
+    this._clipnorm = this.config.clipnorm;
+    this._globalClipNorm = this.config.global_clipnorm;
+    this._clipvalue = this.config.clipvalue;
     this.slotsByName = new Map();
+    this._oneMinusBeta1 = 1 - this._beta1;
+    this._oneMinusBeta2 = 1 - this._beta2;
+    this._weightDecayStep = this.config.weight_decay * this._learningRate;
+    this._inverseLossScale = this.config.loss_scale_factor == null
+      ? null
+      : (1 / this.config.loss_scale_factor);
+    this._beta1Power = 1;
+    this._beta2Power = 1;
+    this._biasPowerIteration = 0;
+    this._scratchVariables = [];
+    this._scratchSlots = [];
+    this._scratchGradients = [];
+    this._scratchSquaredNorms = [];
+
+    if (this._clipnorm != null && this._clipnorm > 0) {
+      this._clipMode = 'norm';
+    } else if (this._globalClipNorm != null && this._globalClipNorm > 0) {
+      this._clipMode = 'global';
+    } else if (this._clipvalue != null && this._clipvalue > 0) {
+      this._clipMode = 'value';
+    } else {
+      this._clipMode = 'none';
+    }
   }
 
   _createSlotsForVariable(name, variable) {
     return {
+      name,
+      variableRef: variable,
       momentum: {
         originalName: `${name}/m`,
         variable: createSlotVariable(variable),
@@ -482,7 +513,7 @@ export class AdamW extends tf.Optimizer {
         originalName: `${name}/v`,
         variable: createSlotVariable(variable),
       },
-      velocityHat: this.config.amsgrad ? {
+      velocityHat: this._amsgrad ? {
         originalName: `${name}/vhat`,
         variable: createSlotVariable(variable),
       } : null,
@@ -490,7 +521,7 @@ export class AdamW extends tf.Optimizer {
         originalName: `${name}/gacc`,
         variable: createSlotVariable(variable),
       } : null,
-      ema: this.config.use_ema ? {
+      ema: this._useEma ? {
         originalName: `${name}/ema`,
         variable: createSlotVariable(variable),
       } : null,
@@ -507,7 +538,7 @@ export class AdamW extends tf.Optimizer {
     ];
 
     for (const variable of values) {
-      if (variable instanceof tf.Variable && !isTensorDisposed(variable)) {
+      if (variable instanceof tf.Tensor && !isTensorDisposed(variable)) {
         variable.dispose();
       }
     }
@@ -530,18 +561,24 @@ export class AdamW extends tf.Optimizer {
       this.slotsByName.set(name, slotEntry);
     }
 
+    slotEntry.name = name;
+    slotEntry.variableRef = variable;
     return slotEntry;
   }
 
   _applyEma(optimizerIterations) {
-    if (!this.config.use_ema) {
+    if (!this._useEma) {
       return;
     }
 
-    const momentum = optimizerIterations !== 0 ? this.config.ema_momentum : 0;
+    const momentum = optimizerIterations !== 0 ? this._emaMomentum : 0;
 
-    for (const [name, slotEntry] of this.slotsByName.entries()) {
-      const variable = tf.engine().registeredVariables[name];
+    for (const slotEntry of this.slotsByName.values()) {
+      let variable = slotEntry.variableRef;
+      if (!(variable instanceof tf.Variable) || isTensorDisposed(variable)) {
+        variable = tf.engine().registeredVariables[slotEntry.name];
+        slotEntry.variableRef = variable ?? null;
+      }
       if (variable == null) {
         continue;
       }
@@ -552,11 +589,15 @@ export class AdamW extends tf.Optimizer {
       slotEntry.ema.variable.assign(nextEma);
     }
 
-    if (this.config.ema_overwrite_frequency) {
-      const shouldOverwrite = ((optimizerIterations + 1) % this.config.ema_overwrite_frequency) === 0;
+    if (this._emaOverwriteFrequency) {
+      const shouldOverwrite = ((optimizerIterations + 1) % this._emaOverwriteFrequency) === 0;
       if (shouldOverwrite) {
-        for (const [name, slotEntry] of this.slotsByName.entries()) {
-          const variable = tf.engine().registeredVariables[name];
+        for (const slotEntry of this.slotsByName.values()) {
+          let variable = slotEntry.variableRef;
+          if (!(variable instanceof tf.Variable) || isTensorDisposed(variable)) {
+            variable = tf.engine().registeredVariables[slotEntry.name];
+            slotEntry.variableRef = variable ?? null;
+          }
           if (variable == null) {
             continue;
           }
@@ -564,6 +605,15 @@ export class AdamW extends tf.Optimizer {
         }
       }
     }
+  }
+
+  _syncBiasCorrectionPowers(optimizerIterations) {
+    if (this._biasPowerIteration === optimizerIterations) {
+      return;
+    }
+    this._beta1Power = Math.pow(this._beta1, optimizerIterations);
+    this._beta2Power = Math.pow(this._beta2, optimizerIterations);
+    this._biasPowerIteration = optimizerIterations;
   }
 
   applyGradients(variableGradients) {
@@ -574,9 +624,49 @@ export class AdamW extends tf.Optimizer {
     const optimizerIterations = steps
       ? Math.floor(internalIterations / steps)
       : internalIterations;
+    const inverseSteps = steps ? (1 / steps) : null;
+    const inverseLossScale = this._inverseLossScale;
+    const oneMinusBeta1 = this._oneMinusBeta1;
+    const oneMinusBeta2 = this._oneMinusBeta2;
+    const epsilon = this._epsilon;
+    const weightDecayStep = this._weightDecayStep;
+    const amsgrad = this._amsgrad;
 
     tf.tidy(() => {
-      const records = [];
+      const variables = this._scratchVariables;
+      const slotsList = this._scratchSlots;
+      const gradients = this._scratchGradients;
+      const squaredNorms = this._scratchSquaredNorms;
+      variables.length = 0;
+      slotsList.length = 0;
+      gradients.length = 0;
+      squaredNorms.length = 0;
+
+      if (steps && !shouldUpdate) {
+        for (const name of gradientNames) {
+          let gradient = gradientMap[name];
+          if (gradient == null) {
+            continue;
+          }
+
+          const variable = getRegisteredVariable(name);
+          const slots = this._ensureSlots(name, variable);
+
+          if (gradient.dtype !== variable.dtype) {
+            gradient = tf.cast(gradient, variable.dtype);
+          }
+
+          if (inverseLossScale != null) {
+            gradient = tf.mul(gradient, inverseLossScale);
+          }
+
+          const nextAccumulator = tf.add(slots.gradientAccumulator.variable, gradient);
+          slots.gradientAccumulator.variable.assign(nextAccumulator);
+        }
+
+        this._applyEma(optimizerIterations);
+        return;
+      }
 
       for (const name of gradientNames) {
         let gradient = gradientMap[name];
@@ -591,88 +681,103 @@ export class AdamW extends tf.Optimizer {
           gradient = tf.cast(gradient, variable.dtype);
         }
 
-        if (this.config.loss_scale_factor != null) {
-          gradient = tf.div(gradient, this.config.loss_scale_factor);
+        if (inverseLossScale != null) {
+          gradient = tf.mul(gradient, inverseLossScale);
         }
 
         if (steps) {
-          if (shouldUpdate) {
-            gradient = tf.div(tf.add(gradient, slots.gradientAccumulator.variable), steps);
-          } else {
-            const nextAccumulator = tf.add(slots.gradientAccumulator.variable, gradient);
-            slots.gradientAccumulator.variable.assign(nextAccumulator);
-          }
+          gradient = tf.mul(tf.add(gradient, slots.gradientAccumulator.variable), inverseSteps);
         }
 
-        records.push({ variable, slots, gradient });
+        variables.push(variable);
+        slotsList.push(slots);
+        gradients.push(gradient);
       }
 
-      if (shouldUpdate && records.length > 0) {
-        const clipped = this.constructor._clipGradients(records.map((record) => record.gradient), this.config);
-        for (let index = 0; index < records.length; index += 1) {
-          records[index].gradient = clipped[index];
-        }
-
-        if (this.config.weight_decay != null) {
-          for (const record of records) {
-            const decayed = tf.sub(
-              record.variable,
-              tf.mul(record.variable, this.config.weight_decay * this.config.learning_rate)
-            );
-            record.variable.assign(decayed);
+      if (gradients.length > 0) {
+        if (this._clipMode === 'norm') {
+          for (let index = 0; index < gradients.length; index += 1) {
+            gradients[index] = this.constructor._clipByNorm(gradients[index], this._clipnorm);
+          }
+        } else if (this._clipMode === 'global') {
+          for (const gradient of gradients) {
+            squaredNorms.push(tf.sum(tf.square(gradient)));
+          }
+          const squaredNormSum = squaredNorms.length === 1 ? squaredNorms[0] : tf.addN(squaredNorms);
+          const useNorm = tf.sqrt(squaredNormSum);
+          const scale = this.constructor._globalNormScaleFromNorm(useNorm, this._globalClipNorm);
+          for (let index = 0; index < gradients.length; index += 1) {
+            gradients[index] = tf.mul(gradients[index], scale);
+          }
+        } else if (this._clipMode === 'value') {
+          for (let index = 0; index < gradients.length; index += 1) {
+            gradients[index] = tf.clipByValue(gradients[index], -this._clipvalue, this._clipvalue);
           }
         }
 
-        const localStep = optimizerIterations + 1;
-        const beta1Power = Math.pow(this.config.beta_1, localStep);
-        const beta2Power = Math.pow(this.config.beta_2, localStep);
+        this._syncBiasCorrectionPowers(optimizerIterations);
+        this._beta1Power *= this._beta1;
+        this._beta2Power *= this._beta2;
+        this._biasPowerIteration = optimizerIterations + 1;
         const alpha = (
-          this.config.learning_rate
-          * Math.sqrt(1 - beta2Power)
-          / (1 - beta1Power)
+          this._learningRate
+          * Math.sqrt(1 - this._beta2Power)
+          / (1 - this._beta1Power)
         );
 
-        for (const record of records) {
-          const m = record.slots.momentum.variable;
-          const v = record.slots.velocity.variable;
+        for (let index = 0; index < gradients.length; index += 1) {
+          const variable = variables[index];
+          const slots = slotsList[index];
+          const gradient = gradients[index];
+          const m = slots.momentum.variable;
+          const v = slots.velocity.variable;
 
           const nextMomentum = tf.add(
             m,
-            tf.mul(tf.sub(record.gradient, m), 1 - this.config.beta_1)
+            tf.mul(tf.sub(gradient, m), oneMinusBeta1)
           );
           const nextVelocity = tf.add(
             v,
-            tf.mul(tf.sub(tf.square(record.gradient), v), 1 - this.config.beta_2)
+            tf.mul(tf.sub(tf.square(gradient), v), oneMinusBeta2)
           );
 
           m.assign(nextMomentum);
           v.assign(nextVelocity);
 
           let sourceVelocity = nextVelocity;
-          if (this.config.amsgrad) {
-            const velocityHat = record.slots.velocityHat.variable;
+          if (amsgrad) {
+            const velocityHat = slots.velocityHat.variable;
             const nextVelocityHat = tf.maximum(velocityHat, nextVelocity);
             velocityHat.assign(nextVelocityHat);
             sourceVelocity = nextVelocityHat;
           }
 
-          const nextVariable = tf.sub(
-            record.variable,
+          let nextVariable = tf.sub(
+            variable,
             tf.div(
               tf.mul(nextMomentum, alpha),
-              tf.add(tf.sqrt(sourceVelocity), this.config.epsilon)
+              tf.add(tf.sqrt(sourceVelocity), epsilon)
             )
           );
-          record.variable.assign(nextVariable);
+
+          if (weightDecayStep !== 0) {
+            nextVariable = tf.sub(nextVariable, tf.mul(variable, weightDecayStep));
+          }
+
+          variable.assign(nextVariable);
 
           if (steps) {
-            record.slots.gradientAccumulator.variable.assign(
-              tf.zerosLike(record.slots.gradientAccumulator.variable)
+            slots.gradientAccumulator.variable.assign(
+              tf.zerosLike(slots.gradientAccumulator.variable)
             );
           }
         }
       }
 
+      variables.length = 0;
+      slotsList.length = 0;
+      gradients.length = 0;
+      squaredNorms.length = 0;
       this._applyEma(optimizerIterations);
     });
 
