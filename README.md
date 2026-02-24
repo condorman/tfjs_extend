@@ -120,6 +120,27 @@ const layer = multiHeadAttention({
 npm test
 ```
 
+## Benchmarks (WASM only)
+
+The Playwright benchmark is hard-pinned to TensorFlow.js `wasm` backend and fails if backend initialization does not resolve to `wasm`.
+
+Install Chromium for Playwright (first run only):
+
+```bash
+npx playwright install chromium
+```
+
+Run benchmark:
+
+```bash
+npm run bench:wasm
+```
+
+Benchmark files:
+
+- `scripts/benchmarks/wasm.bench.mjs`
+- `scripts/benchmarks/wasm.bench.html`
+
 ## Python setup (golden generation)
 
 ```bash

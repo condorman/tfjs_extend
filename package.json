@@ -36,12 +36,16 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "golden:generate": "python3 generate_golden.py"
+    "golden:generate": "python3 generate_golden.py",
+    "bench:wasm": "node scripts/benchmarks/wasm.bench.mjs"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
     "vitest": "^4.0.18"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
   }
 }

@@ -7,6 +7,8 @@ import * as tf from '@tensorflow/tfjs';
  * Uses trapezoidal rule for numerical integration of ROC curve
  */
 const numThresholds = 200;
+const maxThresholdIndex = numThresholds - 1;
+const numThresholdBuckets = numThresholds + 1;
 const threshold = 0.5;
 const epsilon = 1e-7; // Matches Keras backend.epsilon()
 
@@ -84,9 +86,8 @@ export function auc(yTrue, yPred) {
   const c = getCachedTensors();
 
   return tf.tidy(() => {
-
-    const yTrueFlat = tf.reshape(yTrue, [-1]);
-    const yPredFlat = tf.reshape(yPred, [-1]);
+    const yTrueFlat = tf.cast(tf.reshape(yTrue, [-1]), 'float32');
+    const yPredFlat = tf.cast(tf.reshape(yPred, [-1]), 'float32');
 
     const totalPos = tf.sum(yTrueFlat);
     const totalNeg = tf.sub(tf.scalar(yTrueFlat.size), totalPos);
@@ -94,12 +95,15 @@ export function auc(yTrue, yPred) {
     const hasPos = tf.greater(totalPos, c.zero);
     const hasNeg = tf.greater(totalNeg, c.zero);
 
-    const yPredExpanded = tf.expandDims(yPredFlat, 1);
-    const yTrueExpanded = tf.expandDims(yTrueFlat, 1);
+    // Fast path: convert threshold comparisons into cumulative histogram counts.
+    const floorIndex = tf.floor(tf.mul(yPredFlat, maxThresholdIndex));
+    const startIndex = tf.sub(maxThresholdIndex, floorIndex);
+    const clippedStart = tf.cast(tf.clipByValue(startIndex, 0, numThresholds), 'int32');
 
-    const predPos = tf.greaterEqual(yPredExpanded, c.thresholds);
-    const tp = tf.sum(tf.mul(predPos, yTrueExpanded), 0);
-    const fp = tf.sum(tf.mul(predPos, tf.sub(c.one, yTrueExpanded)), 0);
+    const positiveStarts = tf.bincount(clippedStart, yTrueFlat, numThresholdBuckets);
+    const negativeStarts = tf.bincount(clippedStart, tf.sub(c.one, yTrueFlat), numThresholdBuckets);
+    const tp = tf.cumsum(positiveStarts.slice([0], [numThresholds]));
+    const fp = tf.cumsum(negativeStarts.slice([0], [numThresholds]));
 
     const tpr = tf.divNoNan(tp, totalPos);
     const fpr = tf.divNoNan(fp, totalNeg);
@@ -128,17 +132,18 @@ export function f1(yTrue, yPred) {
   const c = getCachedTensors();
 
   return tf.tidy(() => {
-
-    const yTrueFlat = tf.reshape(yTrue, [-1]);
-    const yPredFlat = tf.reshape(yPred, [-1]);
+    const yTrueFlat = tf.cast(tf.reshape(yTrue, [-1]), 'float32');
+    const yPredFlat = tf.cast(tf.reshape(yPred, [-1]), 'float32');
 
     // Apply threshold to predictions
-    const yPredThresholded = tf.greaterEqual(yPredFlat, c.threshold);
+    const yPredThresholded = tf.cast(tf.greaterEqual(yPredFlat, c.threshold), 'float32');
 
-    // Calculate True Positives, False Positives, False Negatives
+    // Aggregate counts first to reduce elementwise ops.
     const tp = tf.sum(tf.mul(yTrueFlat, yPredThresholded));
-    const fp = tf.sum(tf.mul(tf.sub(c.one, yTrueFlat), yPredThresholded));
-    const fn = tf.sum(tf.mul(yTrueFlat, tf.sub(c.one, yPredThresholded)));
+    const predPos = tf.sum(yPredThresholded);
+    const truePos = tf.sum(yTrueFlat);
+    const fp = tf.sub(predPos, tp);
+    const fn = tf.sub(truePos, tp);
 
     // Calculate precision and recall with epsilon (Keras approach)
     const precision = tf.div(tp, tf.add(tf.add(tp, fp), c.epsilon));
